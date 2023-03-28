@@ -1,9 +1,9 @@
 [package]
-name = "infix-to-rpn"
+name = "rpn"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-xtree = { path = "C:\\Users\\fredd\\Desktop\\xtree-0.1.8\\" }
+r3bl_rs_utils = "0.9.6"
