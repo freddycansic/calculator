@@ -1,8 +1,9 @@
 #![feature(let_chains)]
 
-use std::{collections::VecDeque, fmt::Debug, path::Iter};
+use std::{collections::VecDeque, fmt::Debug, io};
 
-use r3bl_rs_utils::{Arena, NodeRef};
+use ptree::{print_tree, TreeBuilder};
+use r3bl_rs_utils::Arena;
 
 #[derive(Debug)]
 enum TokenType {
@@ -21,7 +22,7 @@ fn main() {
 
     let infix = "((31 * 12) / (4+1))";
     let infix = infix.split_whitespace().collect::<Vec<&str>>().join("");
-    println!("{}", infix);
+    // println!("{}", infix);
 
     let mut tokens: Vec<(TokenType, String)> = Vec::new();
     let mut infix_chars = infix.char_indices().peekable();
@@ -71,75 +72,61 @@ fn main() {
     // for el in tree.tree_walk_bfs(0).unwrap() {
     //     println!("{}", tree.get_node_arc(el).unwrap().read().unwrap().payload)
     // }
-    postfix_traversal(&tree, 0);
+    // println!("{:#?}", postfix_traversal(&tree));
+
+    if let Err(err) = print_arena_tree(&tree) {
+        panic!("{}", err);
+    }
+
+    println!();
+    postfix_traversal(&tree)
+        .iter()
+        .for_each(|node_id| print!("{}", node_id));
+    println!();
 }
 
-fn postfix_traversal<T>(tree: &Arena<T>, mut root: usize) -> ()
+fn postfix_traversal<T>(tree: &Arena<T>) -> VecDeque<usize>
 where
     T: Default + Clone + Debug + Send + Sync,
 {
-    //     Create an empty stack and push the root node onto the stack.
-    // While the stack is not empty:
-    // a) Pop the top node from the stack.
-    // b) If the popped node has both left and right children, push the right child onto the stack followed by the left child.
-    // c) If the popped node has no children or both its children have been visited, print its value.
-    // d) If the popped node has only a left child and the left child has not been visited, push the left child onto the stack.
-    // e) If the popped node has only a right child and the right child has not been visited, push the right child onto the stack.
-    // f) Mark the popped node as visited.
-    // Repeat step 2 until the stack is empty.
+    let mut tree_with_none = Arena::<Option<T>>::new();
+    todo!("Copy tree and add null children to leaves");
 
-    if let None = tree.get_node_arc(root) {
-        panic!("No node at {root} to traverse from!");
+    if let Err(err) = print_arena_tree(&tree_with_none) {
+        panic!("{}", err);
     }
 
-    println!();
+    let mut path = VecDeque::<usize>::new();
+    postfix(&tree_with_none, 0, &mut path);
+    path
+}
 
-    let mut stack = VecDeque::<usize>::new();
-    let mut visited = Vec::<usize>::new();
-
-    stack.push_back(root);
-
-    while !stack.is_empty() {
-        let node = stack.pop_back().unwrap();
-
-        match tree.get_children_of(node) {
-            Some(children) => match children.len() {
-                2 => {
-                    let left_child = children.front().unwrap().clone();
-                    let right_child = children.back().unwrap().clone();
-
-                    let left_child_visited = visited.contains(&left_child);
-                    let right_child_visited = visited.contains(&right_child);
-
-                    if left_child_visited && right_child_visited {
-                        println!(
-                            "{:#?}",
-                            tree.get_node_arc(node).unwrap().read().unwrap().payload
-                        );
-                    } else if !left_child_visited && !right_child_visited {
-                        stack.push_back(right_child);
-                        stack.push_back(left_child);
-                    }
-                }
-                1 => {
-                    let single_child = children.front().unwrap().clone();
-                    if !visited.contains(&single_child) {
-                        stack.push_back(single_child)
-                    }
-                }
-                _ => (),
-            },
-            None => {
-                println!(
-                    "{:#?}",
-                    tree.get_node_arc(node).unwrap().read().unwrap().payload
-                );
-            }
-        }
-
-        visited.push(node);
+fn postfix<T>(tree: &Arena<Option<T>>, current: usize, path: &mut VecDeque<usize>)
+where
+    T: Default + Clone + Debug + Send + Sync,
+{
+    if tree
+        .get_node_arc(current)
+        .unwrap()
+        .read()
+        .unwrap()
+        .payload
+        .is_none()
+    {
+        return;
     }
-    println!();
+
+    postfix(
+        tree,
+        *tree.get_children_of(current).unwrap().front().unwrap(),
+        path,
+    );
+    postfix(
+        tree,
+        *tree.get_children_of(current).unwrap().back().unwrap(),
+        path,
+    );
+    path.push_back(current)
 }
 
 fn create_parent_if_none<T>(tree: &mut Arena<T>, current: usize) -> usize
@@ -165,4 +152,39 @@ where
             parent
         }
     }
+}
+
+fn build_tree<T>(builder: &mut TreeBuilder, tree: &Arena<T>, current_id: usize)
+where
+    T: Default + Clone + Debug + Send + Sync,
+{
+    // builder.begin_child(format!("{:#?}: \"{:#?}\"", current_id, tree.get_node_arc(current_id).unwrap().read().unwrap().payload));
+    builder.begin_child(format!(
+        "{:?}",
+        tree.get_node_arc(current_id)
+            .unwrap()
+            .read()
+            .unwrap()
+            .payload
+    ));
+
+    if let Some(children_ids) = tree.get_children_of(current_id) {
+        for child_id in children_ids {
+            build_tree(builder, tree, child_id);
+        }
+    }
+
+    builder.end_child();
+}
+
+fn print_arena_tree<T>(tree: &Arena<T>) -> io::Result<()>
+where
+    T: Default + Clone + Debug + Send + Sync,
+{
+    let mut builder = TreeBuilder::new("Expression".to_string());
+    build_tree(&mut builder, tree, 0);
+    let output = builder.build();
+    print_tree(&output)?;
+
+    Ok(())
 }
