@@ -1,4 +1,4 @@
-#![feature(let_chains)]
+#![feature(is_some_and)]
 
 use std::{collections::VecDeque, fmt::Debug, io};
 
@@ -20,9 +20,9 @@ fn main() {
 
     let operators: Vec<char> = vec!['+', '-', '*', '/', '^'];
 
-    let infix = "((31 * 12) / (4+1))";
+    let infix = "((1+(31 * 12)) / (4+1))";
     let infix = infix.split_whitespace().collect::<Vec<&str>>().join("");
-    // println!("{}", infix);
+    println!("{}", infix);
 
     let mut tokens: Vec<(TokenType, String)> = Vec::new();
     let mut infix_chars = infix.char_indices().peekable();
@@ -69,11 +69,6 @@ fn main() {
         }
     }
 
-    // for el in tree.tree_walk_bfs(0).unwrap() {
-    //     println!("{}", tree.get_node_arc(el).unwrap().read().unwrap().payload)
-    // }
-    // println!("{:#?}", postfix_traversal(&tree));
-
     if let Err(err) = print_arena_tree(&tree) {
         panic!("{}", err);
     }
@@ -81,7 +76,7 @@ fn main() {
     println!();
     postfix_traversal(&tree)
         .iter()
-        .for_each(|node_id| print!("{}", node_id));
+        .for_each(|node_id| print!("{} ", tree.get_node_arc(*node_id).unwrap().read().unwrap().payload));
     println!();
 }
 
@@ -89,43 +84,25 @@ fn postfix_traversal<T>(tree: &Arena<T>) -> VecDeque<usize>
 where
     T: Default + Clone + Debug + Send + Sync,
 {
-    let mut tree_with_none = Arena::<Option<T>>::new();
-    todo!("Copy tree and add null children to leaves");
-
-    if let Err(err) = print_arena_tree(&tree_with_none) {
-        panic!("{}", err);
-    }
-
     let mut path = VecDeque::<usize>::new();
-    postfix(&tree_with_none, 0, &mut path);
+    postfix(tree, 0, &mut path);
     path
 }
 
-fn postfix<T>(tree: &Arena<Option<T>>, current: usize, path: &mut VecDeque<usize>)
+fn postfix<T>(tree: &Arena<T>, current: usize, path: &mut VecDeque<usize>)
 where
     T: Default + Clone + Debug + Send + Sync,
 {
-    if tree
-        .get_node_arc(current)
-        .unwrap()
-        .read()
-        .unwrap()
-        .payload
-        .is_none()
-    {
-        return;
+    if let Some(children) = tree.get_children_of(current) {
+        for child in children.iter() {
+            postfix(
+                tree,
+                *child,
+                path,
+            );
+        }
     }
 
-    postfix(
-        tree,
-        *tree.get_children_of(current).unwrap().front().unwrap(),
-        path,
-    );
-    postfix(
-        tree,
-        *tree.get_children_of(current).unwrap().back().unwrap(),
-        path,
-    );
     path.push_back(current)
 }
 
@@ -158,7 +135,7 @@ fn build_tree<T>(builder: &mut TreeBuilder, tree: &Arena<T>, current_id: usize)
 where
     T: Default + Clone + Debug + Send + Sync,
 {
-    // builder.begin_child(format!("{:#?}: \"{:#?}\"", current_id, tree.get_node_arc(current_id).unwrap().read().unwrap().payload));
+    // builder.begin_child(format!("{:#?}: {:#?}", current_id, tree.get_node_arc(current_id).unwrap().read().unwrap().payload));
     builder.begin_child(format!(
         "{:?}",
         tree.get_node_arc(current_id)
