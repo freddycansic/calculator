@@ -14,6 +14,17 @@ enum Token {
     Number(f32),
 }
 
+impl ToString for Token {
+    fn to_string(&self) -> String {
+        match self {
+            Token::ClosingBracket => ")".to_string(),
+            Token::OpeningBracket => "(".to_string(),
+            Token::Number(num) => num.to_string(),
+            Token::Operator(op) => op.symbol.to_string()
+        }
+    }
+}
+
 impl Default for Token {
     fn default() -> Self {
         Token::Number(0.0)
@@ -48,9 +59,16 @@ fn main() {
         Operator::new('^', Associativity::Right, 2),
     ];
 
+    todo!("Do returning result stuff");
+
     let tokens = tokenise(&infix, &operators);
-    let rpn = shunting_yard(&tokens);
-    println!("{}", evaluate_rpn(&rpn));
+    let rpn_tokens = shunting_yard(&tokens);
+
+    println!("{}", rpn_tokens.iter().fold(String::new(), |mut str, token| {str += &token.to_string(); str}));
+
+    print_arena_tree(&string_tree_from_rpn(&rpn_tokens));
+
+    println!("{}", evaluate_rpn(&rpn_tokens));
 }
 
 fn tokenise(infix: &str, operators: &[Operator]) -> Vec<Token> {
@@ -62,7 +80,7 @@ fn tokenise(infix: &str, operators: &[Operator]) -> Vec<Token> {
     while let Some((index, char)) = infix_chars.next() {
         if let Some(op) = operators
             .iter()
-            .find_map(|op| (op.symbol == char).then(|| op))
+            .find_map(|op| (op.symbol == char).then_some(op))
         {
             tokens.push(Token::Operator(op.clone()));
         } else if char == '(' {
@@ -92,53 +110,6 @@ fn tokenise(infix: &str, operators: &[Operator]) -> Vec<Token> {
     tokens
 }
 
-fn postfix_traversal<T>(tree: &Arena<T>) -> VecDeque<usize>
-where
-    T: Default + Clone + Debug + Send + Sync,
-{
-    let mut path = VecDeque::<usize>::new();
-    postfix(tree, 0, &mut path);
-    path
-}
-
-fn postfix<T>(tree: &Arena<T>, current: usize, path: &mut VecDeque<usize>)
-where
-    T: Default + Clone + Debug + Send + Sync,
-{
-    if let Some(children) = tree.get_children_of(current) {
-        for child in children.iter() {
-            postfix(tree, *child, path);
-        }
-    }
-
-    path.push_back(current)
-}
-
-fn create_parent_if_none<T>(tree: &mut Arena<T>, current: usize) -> usize
-where
-    T: Default + Clone + Debug + Send + Sync,
-{
-    match tree.get_parent_of(current) {
-        Some(parent) => parent,
-        None => {
-            let parent = tree.add_new_node(T::default(), None);
-            tree.get_node_arc(current)
-                .unwrap()
-                .write()
-                .unwrap()
-                .parent_id = Some(parent);
-            tree.get_node_arc(parent)
-                .unwrap()
-                .write()
-                .unwrap()
-                .children_ids
-                .push_back(current);
-
-            parent
-        }
-    }
-}
-
 fn evaluate_rpn(rpn_tokens: &Vec<Token>) -> f32 {
     let mut stack = Vec::<f32>::new();
     for token in rpn_tokens.iter() {
@@ -152,7 +123,7 @@ fn evaluate_rpn(rpn_tokens: &Vec<Token>) -> f32 {
                     '-' => stack.push(operand_2 - operand_1),
                     '*' => stack.push(operand_2 * operand_1),
                     '/' => stack.push(operand_2 / operand_1),
-                    '^' => stack.push(operand_1.powf(operand_2)),
+                    '^' => stack.push(operand_2.powf(operand_1)),
                     '%' => stack.push(operand_2 % operand_1),
                     _ => panic!(),
                 }
@@ -164,55 +135,6 @@ fn evaluate_rpn(rpn_tokens: &Vec<Token>) -> f32 {
 
     stack.pop().unwrap()
 }
-
-fn build_string_tree<T>(builder: &mut TreeBuilder, tree: &Arena<T>, current_id: usize)
-where
-    T: Default + Clone + Debug + Send + Sync,
-{
-    // builder.begin_child(format!("{:#?}: {:#?}", current_id, tree.get_node_arc(current_id).unwrap().read().unwrap().payload));
-    builder.begin_child(format!(
-        "{:?}",
-        tree.get_node_arc(current_id)
-            .unwrap()
-            .read()
-            .unwrap()
-            .payload
-    ));
-
-    if let Some(children_ids) = tree.get_children_of(current_id) {
-        for child_id in children_ids {
-            build_string_tree(builder, tree, child_id);
-        }
-    }
-
-    builder.end_child();
-}
-
-fn print_arena_tree<T>(tree: &Arena<T>) -> io::Result<()>
-where
-    T: Default + Clone + Debug + Send + Sync,
-{
-    let mut builder = TreeBuilder::new("Expression".to_string());
-    build_string_tree(&mut builder, tree, 0);
-    let output = builder.build();
-    print_tree(&output)?;
-
-    Ok(())
-}
-
-// For all the input tokens [S1]:
-//  Read the next token [S2];
-//  If token is an operator (x) [S3]:
-//      While there is an operator (y) at the top of the operators stack and either (x) is left-associative and its precedence is less or equal to that of (y), or (x) is right-associative and its precedence is less than (y) [S4]:
-//          Pop (y) from the stack [S5];
-//          Add (y) output buffer [S6];
-//      Push (x) on the stack [S7];
-//  Else If token is left parenthesis, then push it on the stack [S8];
-//  Else If token is a right parenthesis [S9]:
-//      Until the top token (from the stack) is left parenthesis, pop from the stack to the output buffer [S10];
-//      Also pop the left parenthesis but don't include it in the output buffer [S11];
-//  Else add token to output buffer [S12].
-//  While there are still operator tokens in the stack, pop them to output [S13]
 
 fn shunting_yard(tokens: &Vec<Token>) -> Vec<Token> {
     let mut rpn_tokens = Vec::<Token>::new();
@@ -256,4 +178,81 @@ fn shunting_yard(tokens: &Vec<Token>) -> Vec<Token> {
     }
 
     rpn_tokens
+}
+
+fn find_root_node<T>(tree: &Arena<T>) -> Option<usize>
+where
+    T: Default + Clone + Debug + Send + Sync,
+{
+    let mut current_node_id = 0;
+    while tree.has_parent(current_node_id) {
+        current_node_id += 1;
+    }
+    
+    tree.node_exists(current_node_id).then_some(current_node_id)
+}
+
+fn build_string_tree<T>(builder: &mut TreeBuilder, tree: &Arena<T>, current_id: usize)
+where
+    T: Default + Clone + Debug + Send + Sync,
+{
+    // builder.begin_child(format!("{:#?}: {:#?}", current_id, tree.get_node_arc(current_id).unwrap().read().unwrap().payload));
+    builder.begin_child(format!(
+        "{:?}",
+        tree.get_node_arc(current_id)
+            .unwrap()
+            .read()
+            .unwrap()
+            .payload
+    ));
+
+    if let Some(children_ids) = tree.get_children_of(current_id) {
+        for child_id in children_ids {
+            build_string_tree(builder, tree, child_id);
+        }
+    }
+
+    builder.end_child();
+}
+
+fn print_arena_tree<T>(tree: &Arena<T>) -> io::Result<()>
+where
+    T: Default + Clone + Debug + Send + Sync,
+{
+    let root_node = find_root_node(&tree).unwrap();
+
+    let mut builder = TreeBuilder::new("Tree".to_string());
+    build_string_tree(&mut builder, tree, root_node);
+    let output = builder.build();
+    print_tree(&output)?;
+
+    Ok(())
+}
+
+fn string_tree_from_rpn(rpn_tokens: &Vec<Token>) -> Arena<String> {
+    let mut tree = Arena::<String>::new();
+    let mut stack = Vec::<usize>::new();
+
+    for token in rpn_tokens.iter() {
+        match token {
+            Token::Operator(op) => {
+                let operand_1_id = stack.pop().unwrap();
+                let operand_2_id = stack.pop().unwrap();
+
+                let operator_root_id = tree.add_new_node(op.symbol.to_string(), None);
+                tree.get_node_arc(operator_root_id).unwrap().write().unwrap().children_ids = [operand_1_id, operand_2_id].into();
+
+                tree.get_node_arc(operand_1_id).unwrap().write().unwrap().parent_id = Some(operator_root_id);
+                tree.get_node_arc(operand_2_id).unwrap().write().unwrap().parent_id = Some(operator_root_id);
+            
+                stack.push(operator_root_id)
+            },
+            Token::Number(num) => {
+                stack.push(tree.add_new_node(num.to_string(), None))
+            },
+            _ => panic!("Invalid RPN expression!")
+        }
+    }
+
+    tree
 }
