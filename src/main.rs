@@ -1,8 +1,10 @@
 #![feature(is_some_and, let_chains)]
 
-use std::{collections::VecDeque, fmt::Debug, io, mem::discriminant};
+use std::{collections::VecDeque, fmt::Debug, mem::discriminant};
 
+use colored::Colorize;
 use derive_more::Constructor;
+use failure::{format_err, Error};
 use ptree::{print_tree, TreeBuilder};
 use r3bl_rs_utils::Arena;
 
@@ -20,7 +22,7 @@ impl ToString for Token {
             Token::ClosingBracket => ")".to_string(),
             Token::OpeningBracket => "(".to_string(),
             Token::Number(num) => num.to_string(),
-            Token::Operator(op) => op.symbol.to_string()
+            Token::Operator(op) => op.symbol.to_string(),
         }
     }
 }
@@ -59,19 +61,27 @@ fn main() {
         Operator::new('^', Associativity::Right, 2),
     ];
 
-    todo!("Do returning result stuff");
+    let tokens = tokenise(&infix, &operators).unwrap_or_else(|err| panic!("{}", err));
+    let rpn_tokens = shunting_yard(&tokens).unwrap_or_else(|err| panic!("{}", err));
 
-    let tokens = tokenise(&infix, &operators);
-    let rpn_tokens = shunting_yard(&tokens);
+    println!(
+        "{}",
+        rpn_tokens.iter().fold(String::new(), |mut str, token| {
+            str += &(token.to_string() + " ").to_string();
+            str
+        })
+    );
 
-    println!("{}", rpn_tokens.iter().fold(String::new(), |mut str, token| {str += &token.to_string(); str}));
+    print_arena_tree(&string_tree_from_rpn(&rpn_tokens).unwrap_or_else(|err| panic!("{}", err)))
+        .unwrap_or_else(|err| panic!("{}", err));
 
-    print_arena_tree(&string_tree_from_rpn(&rpn_tokens));
-
-    println!("{}", evaluate_rpn(&rpn_tokens));
+    println!(
+        "{}",
+        evaluate_rpn(&rpn_tokens).unwrap_or_else(|err| panic!("{}", err))
+    );
 }
 
-fn tokenise(infix: &str, operators: &[Operator]) -> Vec<Token> {
+fn tokenise(infix: &str, operators: &[Operator]) -> Result<Vec<Token>, Error> {
     let infix = infix.split_whitespace().collect::<Vec<&str>>().join("");
 
     let mut tokens: Vec<Token> = Vec::new();
@@ -102,23 +112,44 @@ fn tokenise(infix: &str, operators: &[Operator]) -> Vec<Token> {
             }
 
             tokens.push(Token::Number(
-                infix[index..next_non_num_index].parse::<f32>().unwrap(),
+                infix[index..next_non_num_index]
+                    .parse::<f32>()
+                    .map_err(|_| {
+                        format_err!(
+                            "{} Failed to cast a token to a float.",
+                            "ERROR!".red().bold()
+                        )
+                    })?,
             ));
+        } else {
+            Err(format_err!(
+                "{} Could not tokenise input! Unexpected token \"{}\"!",
+                "ERROR!".red().bold(),
+                char.to_string().yellow()
+            ))?
         }
     }
 
-    tokens
+    Ok(tokens)
 }
 
-fn evaluate_rpn(rpn_tokens: &Vec<Token>) -> f32 {
+fn evaluate_rpn(rpn_tokens: &Vec<Token>) -> Result<f32, Error> {
     let mut stack = Vec::<f32>::new();
     for token in rpn_tokens.iter() {
         match token {
-            Token::Operator(operator) => {
-                let operand_1 = stack.pop().unwrap();
-                let operand_2 = stack.pop().unwrap();
+            Token::Operator(op) => {
+                let operand_1 = stack.pop().ok_or(format_err!(
+                    "{} Not enough operands for operator \"{}\"!",
+                    "ERROR!".red().bold(),
+                    op.symbol.to_string().yellow()
+                ))?;
+                let operand_2 = stack.pop().ok_or(format_err!(
+                    "{} Not enough operands for operator \"{}\"!",
+                    "ERROR!".red().bold(),
+                    op.symbol.to_string().yellow()
+                ))?;
 
-                match operator.symbol {
+                match op.symbol {
                     '+' => stack.push(operand_2 + operand_1),
                     '-' => stack.push(operand_2 - operand_1),
                     '*' => stack.push(operand_2 * operand_1),
@@ -128,22 +159,28 @@ fn evaluate_rpn(rpn_tokens: &Vec<Token>) -> f32 {
                     _ => panic!(),
                 }
             }
-            Token::Number(number) => stack.push(*number),
-            _ => panic!(),
+            Token::Number(num) => stack.push(*num),
+            _ => Err(format_err!(
+                "{} Could not evaluate RPN expression!",
+                "ERROR!".red().bold()
+            ))?,
         }
     }
 
-    stack.pop().unwrap()
+    Ok(stack.pop().ok_or(format_err!(
+        "{} Could not evaluate RPN expression!",
+        "ERROR!".red().bold()
+    ))?)
 }
 
-fn shunting_yard(tokens: &Vec<Token>) -> Vec<Token> {
+fn shunting_yard(tokens: &Vec<Token>) -> Result<Vec<Token>, Error> {
     let mut rpn_tokens = Vec::<Token>::new();
     let mut stack = VecDeque::<Token>::new();
 
     for token in tokens.iter() {
         match token {
             Token::Operator(operator_x) => {
-                // if the top of stack is an operator type. discriminant means disregard the contents of the enum
+                // if the top of stack is an operator type. discriminant means disregard the contents of the enum and only compare the types
                 while let Some(Token::Operator(operator_y)) = stack.back() {
                     if discriminant(stack.back().unwrap()) == discriminant(token)
                         && ((operator_x.associativity == Associativity::Left
@@ -151,7 +188,10 @@ fn shunting_yard(tokens: &Vec<Token>) -> Vec<Token> {
                             || (operator_x.associativity == Associativity::Right
                                 && operator_x.precedence < operator_y.precedence))
                     {
-                        rpn_tokens.push(stack.pop_back().unwrap());
+                        rpn_tokens.push(stack.pop_back().ok_or(format_err!(
+                            "{} Could not parse expression to RPN!",
+                            "ERROR!".red().bold()
+                        ))?);
                     } else {
                         break;
                     }
@@ -177,7 +217,7 @@ fn shunting_yard(tokens: &Vec<Token>) -> Vec<Token> {
         rpn_tokens.push(token.clone())
     }
 
-    rpn_tokens
+    Ok(rpn_tokens)
 }
 
 fn find_root_node<T>(tree: &Arena<T>) -> Option<usize>
@@ -188,7 +228,7 @@ where
     while tree.has_parent(current_node_id) {
         current_node_id += 1;
     }
-    
+
     tree.node_exists(current_node_id).then_some(current_node_id)
 }
 
@@ -215,11 +255,14 @@ where
     builder.end_child();
 }
 
-fn print_arena_tree<T>(tree: &Arena<T>) -> io::Result<()>
+fn print_arena_tree<T>(tree: &Arena<T>) -> Result<(), Error>
 where
     T: Default + Clone + Debug + Send + Sync,
 {
-    let root_node = find_root_node(&tree).unwrap();
+    let root_node = find_root_node(&tree).ok_or(failure::format_err!(
+        "{} No root node found.",
+        "ERROR!".red().bold()
+    ))?;
 
     let mut builder = TreeBuilder::new("Tree".to_string());
     build_string_tree(&mut builder, tree, root_node);
@@ -229,30 +272,54 @@ where
     Ok(())
 }
 
-fn string_tree_from_rpn(rpn_tokens: &Vec<Token>) -> Arena<String> {
+fn string_tree_from_rpn(rpn_tokens: &Vec<Token>) -> Result<Arena<String>, Error> {
     let mut tree = Arena::<String>::new();
     let mut stack = Vec::<usize>::new();
 
     for token in rpn_tokens.iter() {
         match token {
             Token::Operator(op) => {
-                let operand_1_id = stack.pop().unwrap();
-                let operand_2_id = stack.pop().unwrap();
+                let operand_1_id = stack.pop().ok_or(format_err!(
+                    "{} Not enough operands for operator \"{}\"!",
+                    "ERROR!".red().bold(),
+                    op.symbol.to_string().yellow()
+                ))?;
+                let operand_2_id = stack.pop().ok_or(format_err!(
+                    "{} Not enough operands for operator \"{}\"!",
+                    "ERROR!".red().bold(),
+                    op.symbol.to_string().yellow()
+                ))?;
 
                 let operator_root_id = tree.add_new_node(op.symbol.to_string(), None);
-                tree.get_node_arc(operator_root_id).unwrap().write().unwrap().children_ids = [operand_1_id, operand_2_id].into();
+                tree.get_node_arc(operator_root_id)
+                    .unwrap()
+                    .write()
+                    .unwrap()
+                    .children_ids = [operand_1_id, operand_2_id].into();
 
-                tree.get_node_arc(operand_1_id).unwrap().write().unwrap().parent_id = Some(operator_root_id);
-                tree.get_node_arc(operand_2_id).unwrap().write().unwrap().parent_id = Some(operator_root_id);
-            
+                tree.get_node_arc(operand_1_id)
+                    .unwrap()
+                    .write()
+                    .unwrap()
+                    .parent_id = Some(operator_root_id);
+                tree.get_node_arc(operand_2_id)
+                    .unwrap()
+                    .write()
+                    .unwrap()
+                    .parent_id = Some(operator_root_id);
+
                 stack.push(operator_root_id)
-            },
-            Token::Number(num) => {
-                stack.push(tree.add_new_node(num.to_string(), None))
-            },
-            _ => panic!("Invalid RPN expression!")
+            }
+            Token::Number(num) => stack.push(tree.add_new_node(num.to_string(), None)),
+            _ => {
+                return Err(format_err!(
+                    "{} Unexpected token : \"{}\"",
+                    "ERROR!".red().bold(),
+                    token.to_string().yellow()
+                ))
+            }
         }
     }
 
-    tree
+    Ok(tree)
 }
