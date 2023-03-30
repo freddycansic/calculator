@@ -20,11 +20,11 @@ Version: {version}
 struct Args {
     #[arg(
         long = "print-tree",
-        help = "Print the infix expression in reverse polish notation"
+        help = "Print the expression tree"
     )]
     print_tree: bool,
 
-    #[arg(long = "print-rpn", help = "Print the expression tree")]
+    #[arg(long = "print-rpn", help = "Print the infix expression in reverse polish notation")]
     print_rpn: bool,
 
     #[arg(last = true)]
